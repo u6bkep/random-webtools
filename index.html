@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Tools Collection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 4rem;
+            color: white;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            font-weight: 400;
+        }
+
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .tool-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .tool-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .tool-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+
+        .tool-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .tool-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .tool-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #2d3748;
+        }
+
+        .tool-description {
+            color: #4a5568;
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+        }
+
+        .tool-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            gap: 0.5rem;
+        }
+
+        .tool-link:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .tool-link::after {
+            content: '→';
+            transition: transform 0.2s ease;
+        }
+
+        .tool-link:hover::after {
+            transform: translateX(3px);
+        }
+
+        footer {
+            text-align: center;
+            color: rgba(255,255,255,0.8);
+            margin-top: 4rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .tools-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .tool-card {
+                padding: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Web Tools Collection</h1>
+            <p class="subtitle">A uncurated collection of simple vibe coded tools I wrote for my own use</p>
+        </header>
+
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-icon">🎨</div>
+                <h3 class="tool-title">SVG Color Palette Tool</h3>
+                <p class="tool-description">
+                    Transform and manipulate color palettes in SVG files. allows morphing colors between the three primary colors (red, green, blue).
+                </p>
+                <a href="svg_color_transformer.html" class="tool-link">Launch Tool</a>
+            </div>
+
+            <div class="tool-card">
+                <div class="tool-icon">🌈</div>
+                <h3 class="tool-title">HSV Color Space Explorer</h3>
+                <p class="tool-description">
+                    Learn and visualize the HSV (Hue, Saturation, Value) color model through interactive exploration. Understand how colors relate to each other and master color theory fundamentals with hands-on experimentation.
+                </p>
+                <a href="hsv_color_explorer.html" class="tool-link">Explore Colors</a>
+            </div>
+
+            <div class="tool-card">
+                <div class="tool-icon">📊</div>
+                <h3 class="tool-title">random color Palette</h3>
+                <p class="tool-description">
+                    Generate random, complimentory color palettes for your design projects. Perfect for inspiration or when you need a quick color scheme to get started.
+                </p>
+                <a href="color-generator.html" class="tool-link">Generate Palette</a>
+            </div>
+
+            <div class="tool-card">
+                <div class="tool-icon">⏱️</div>
+                <h3 class="tool-title">Segment Display Animation</h3>
+                <p class="tool-description">
+                    A stupid little animation that demonstrates a concept for a segment display, where segments light up in a sequence to create a visually appealing effect.
+                </p>
+                <a href="segment-display-animation.html" class="tool-link">View Animation</a>
+            </div>
+                
+
+            <!-- Placeholder cards for future tools -->
+            <div class="tool-card" style="opacity: 0.6;">
+                <div class="tool-icon">🔧</div>
+                <h3 class="tool-title">More Tools Coming Soon</h3>
+                <p class="tool-description">
+                    Additional web utilities are in development. Check back regularly for new tools that will help streamline your workflow and enhance your productivity.
+                </p>
+                <span class="tool-link" style="opacity: 0.5; cursor: not-allowed;">Coming Soon</span>
+            </div>
+        </div>
+
+        <footer>
+            <p>Simple tools for silly tasks • Built by a god in a bottle</p>
+        </footer>
+    </div>
+</body>
+</html>

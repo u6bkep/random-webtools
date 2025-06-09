@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSV Color Space Explorer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .color-spaces {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .color-space {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            backdrop-filter: blur(5px);
+        }
+        
+        .color-space h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+        
+        .color-wheel-container {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            margin: 0 auto 20px;
+        }
+        
+        .color-wheel {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            cursor: crosshair;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .color-picker {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 3px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.5);
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            max-width: 300px;
+        }
+        
+        .control-group label {
+            min-width: 80px;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.9em;
+            letter-spacing: 1px;
+        }
+        
+        .slider {
+            flex: 1;
+            height: 8px;
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+            -webkit-appearance: none;
+        }
+        
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        
+        .value-display {
+            min-width: 40px;
+            text-align: right;
+            font-weight: bold;
+            font-family: monospace;
+        }
+        
+        .color-preview {
+            width: 120px;
+            height: 120px;
+            border-radius: 15px;
+            margin: 20px auto;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            border: 3px solid rgba(255,255,255,0.3);
+        }
+        
+        .rgb-display {
+            text-align: center;
+            font-family: monospace;
+            font-size: 1.1em;
+            font-weight: bold;
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        
+        .explanation {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 30px;
+            backdrop-filter: blur(5px);
+        }
+        
+        .explanation h3 {
+            margin-top: 0;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+        }
+        
+        .explanation p {
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+        
+        .explanation ul {
+            line-height: 1.6;
+            padding-left: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .color-spaces {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>HSV Color Space Explorer</h1>
+        <div class="subtitle">Interactive visualization of Hue, Saturation, and Value color transformations</div>
+        
+        <div class="color-spaces">
+            <div class="color-space">
+                <h2>Color Space A</h2>
+                <div class="color-wheel-container">
+                    <canvas class="color-wheel" id="wheel1" width="280" height="280"></canvas>
+                    <div class="color-picker" id="picker1"></div>
+                </div>
+                <div class="controls">
+                    <div class="control-group">
+                        <label>Hue:</label>
+                        <input type="range" class="slider" id="hue1" min="0" max="360" value="0">
+                        <span class="value-display" id="hueVal1">0°</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Sat:</label>
+                        <input type="range" class="slider" id="sat1" min="0" max="100" value="100">
+                        <span class="value-display" id="satVal1">100%</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Val:</label>
+                        <input type="range" class="slider" id="val1" min="0" max="100" value="100">
+                        <span class="value-display" id="valVal1">100%</span>
+                    </div>
+                </div>
+                <div class="color-preview" id="preview1"></div>
+                <div class="rgb-display" id="rgb1">RGB(255, 0, 0)</div>
+                <div class="rgb-input">
+                    <input type="text" id="rgbInput1" placeholder="Enter RGB (e.g., 255,128,64)" 
+                           style="width: 200px; padding: 8px; border-radius: 5px; border: none; 
+                                  background: rgba(255,255,255,0.9); color: #333; font-family: monospace;
+                                  text-align: center; margin-top: 10px;">
+                    <button onclick="applyRgbColor(1)" 
+                            style="padding: 8px 15px; margin-left: 10px; border-radius: 5px; border: none;
+                                   background: rgba(255,255,255,0.9); color: #333; cursor: pointer;
+                                   font-weight: bold;">Apply</button>
+                </div>
+            </div>
+            
+            <div class="color-space">
+                <h2>Color Space B</h2>
+                <div class="color-wheel-container">
+                    <canvas class="color-wheel" id="wheel2" width="280" height="280"></canvas>
+                    <div class="color-picker" id="picker2"></div>
+                </div>
+                <div class="controls">
+                    <div class="control-group">
+                        <label>Hue:</label>
+                        <input type="range" class="slider" id="hue2" min="0" max="360" value="240">
+                        <span class="value-display" id="hueVal2">240°</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Sat:</label>
+                        <input type="range" class="slider" id="sat2" min="0" max="100" value="80">
+                        <span class="value-display" id="satVal2">80%</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Val:</label>
+                        <input type="range" class="slider" id="val2" min="0" max="100" value="70">
+                        <span class="value-display" id="valVal2">70%</span>
+                    </div>
+                </div>
+                <div class="color-preview" id="preview2"></div>
+                <div class="rgb-display" id="rgb2">RGB(36, 36, 178)</div>
+                <div class="rgb-input">
+                    <input type="text" id="rgbInput2" placeholder="Enter RGB (e.g., 128,255,192)" 
+                           style="width: 200px; padding: 8px; border-radius: 5px; border: none; 
+                                  background: rgba(255,255,255,0.9); color: #333; font-family: monospace;
+                                  text-align: center; margin-top: 10px;">
+                    <button onclick="applyRgbColor(2)" 
+                            style="padding: 8px 15px; margin-left: 10px; border-radius: 5px; border: none;
+                                   background: rgba(255,255,255,0.9); color: #333; cursor: pointer;
+                                   font-weight: bold;">Apply</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="explanation">
+            <h3>Understanding HSV Color Space</h3>
+            <p><strong>HSV (Hue, Saturation, Value)</strong> is a cylindrical color model that represents colors in a way that's more intuitive for human perception compared to RGB.</p>
+            
+            <ul>
+                <li><strong>Hue (H):</strong> The color itself, represented as degrees on a color wheel (0-360°). Red is 0°, green is 120°, blue is 240°.</li>
+                <li><strong>Saturation (S):</strong> The intensity or purity of the color (0-100%). 0% is grayscale, 100% is the purest form of the hue.</li>
+                <li><strong>Value (V):</strong> The brightness of the color (0-100%). 0% is black, 100% is the brightest possible version.</li>
+            </ul>
+            
+            <p>Click and drag on the color wheels above, use the sliders to see how adjusting each parameter affects the final color, or <strong>paste in RGB values</strong> to convert them to HSV and explore how they transform. The RGB input accepts multiple formats like "255,128,64", "rgb(255,128,64)", or "#ff8040".</p>
+        </div>
+    </div>
+
+    <script>
+        function hsvToRgb(h, s, v) {
+            h = h / 360;
+            s = s / 100;
+            v = v / 100;
+            
+            let r, g, b;
+            let i = Math.floor(h * 6);
+            let f = h * 6 - i;
+            let p = v * (1 - s);
+            let q = v * (1 - f * s);
+            let t = v * (1 - (1 - f) * s);
+            
+            switch (i % 6) {
+                case 0: r = v, g = t, b = p; break;
+                case 1: r = q, g = v, b = p; break;
+                case 2: r = p, g = v, b = t; break;
+                case 3: r = p, g = q, b = v; break;
+                case 4: r = t, g = p, b = v; break;
+                case 5: r = v, g = p, b = q; break;
+            }
+            
+            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+        }
+
+        function rgbToHsv(r, g, b) {
+            r = r / 255;
+            g = g / 255;
+            b = b / 255;
+            
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+            
+            let h = 0;
+            if (delta !== 0) {
+                if (max === r) {
+                    h = ((g - b) / delta) % 6;
+                } else if (max === g) {
+                    h = (b - r) / delta + 2;
+                } else {
+                    h = (r - g) / delta + 4;
+                }
+            }
+            h = Math.round(h * 60);
+            if (h < 0) h += 360;
+            
+            const s = max === 0 ? 0 : Math.round((delta / max) * 100);
+            const v = Math.round(max * 100);
+            
+            return [h, s, v];
+        }
+
+        function applyRgbColor(id) {
+            const input = document.getElementById(`rgbInput${id}`);
+            const rgbValue = input.value.trim();
+            
+            // Parse different RGB formats
+            let r, g, b;
+            
+            // Try to match various formats
+            const formats = [
+                /^(\d+),\s*(\d+),\s*(\d+)$/, // 255, 128, 64
+                /^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)$/i, // rgb(255, 128, 64)
+                /^(\d+)\s+(\d+)\s+(\d+)$/, // 255 128 64
+                /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i // #ff8040 or ff8040
+            ];
+            
+            let matched = false;
+            for (let i = 0; i < formats.length; i++) {
+                const match = rgbValue.match(formats[i]);
+                if (match) {
+                    if (i === 3) { // Hex format
+                        r = parseInt(match[1], 16);
+                        g = parseInt(match[2], 16);
+                        b = parseInt(match[3], 16);
+                    } else {
+                        r = parseInt(match[1]);
+                        g = parseInt(match[2]);
+                        b = parseInt(match[3]);
+                    }
+                    matched = true;
+                    break;
+                }
+            }
+            
+            if (!matched || r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) {
+                alert('Please enter a valid RGB color format:\n• 255, 128, 64\n• rgb(255, 128, 64)\n• 255 128 64\n• #ff8040 or ff8040');
+                return;
+            }
+            
+            // Convert RGB to HSV
+            const [h, s, v] = rgbToHsv(r, g, b);
+            
+            // Update the sliders
+            document.getElementById(`hue${id}`).value = h;
+            document.getElementById(`sat${id}`).value = s;
+            document.getElementById(`val${id}`).value = v;
+            
+            // Update the display
+            updateColorSpace(id);
+            
+            // Clear the input
+            input.value = '';
+        }
+
+        function drawColorWheel(canvas, selectedH, selectedS, selectedV) {
+            const ctx = canvas.getContext('2d');
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = Math.min(centerX, centerY) - 10;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw the HSV color wheel
+            for (let angle = 0; angle < 360; angle += 1) {
+                for (let r = 0; r < radius; r += 1) {
+                    const hue = angle;
+                    const saturation = (r / radius) * 100;
+                    const value = selectedV;
+                    
+                    const [red, green, blue] = hsvToRgb(hue, saturation, value);
+                    
+                    const x = centerX + r * Math.cos((angle - 90) * Math.PI / 180);
+                    const y = centerY + r * Math.sin((angle - 90) * Math.PI / 180);
+                    
+                    ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+                    ctx.fillRect(x, y, 2, 2);
+                }
+            }
+        }
+
+        function updateColorSpace(id) {
+            const h = parseInt(document.getElementById(`hue${id}`).value);
+            const s = parseInt(document.getElementById(`sat${id}`).value);
+            const v = parseInt(document.getElementById(`val${id}`).value);
+            
+            // Update value displays
+            document.getElementById(`hueVal${id}`).textContent = h + '°';
+            document.getElementById(`satVal${id}`).textContent = s + '%';
+            document.getElementById(`valVal${id}`).textContent = v + '%';
+            
+            // Update color wheel
+            const canvas = document.getElementById(`wheel${id}`);
+            drawColorWheel(canvas, h, s, v);
+            
+            // Update picker position
+            const picker = document.getElementById(`picker${id}`);
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = (Math.min(centerX, centerY) - 10) * (s / 100);
+            const angle = (h - 90) * Math.PI / 180;
+            
+            const x = centerX + radius * Math.cos(angle);
+            const y = centerY + radius * Math.sin(angle);
+            
+            picker.style.left = x + 'px';
+            picker.style.top = y + 'px';
+            
+            // Update color preview
+            const [r, g, b] = hsvToRgb(h, s, v);
+            const preview = document.getElementById(`preview${id}`);
+            preview.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+            
+            // Update RGB display
+            document.getElementById(`rgb${id}`).textContent = `RGB(${r}, ${g}, ${b})`;
+            
+            // Update slider backgrounds
+            const hueSlider = document.getElementById(`hue${id}`);
+            hueSlider.style.background = `linear-gradient(to right, 
+                hsl(0, 100%, 50%), hsl(60, 100%, 50%), hsl(120, 100%, 50%), 
+                hsl(180, 100%, 50%), hsl(240, 100%, 50%), hsl(300, 100%, 50%), hsl(360, 100%, 50%))`;
+            
+            const satSlider = document.getElementById(`sat${id}`);
+            const [rGray, gGray, bGray] = hsvToRgb(h, 0, v);
+            const [rFull, gFull, bFull] = hsvToRgb(h, 100, v);
+            satSlider.style.background = `linear-gradient(to right, rgb(${rGray}, ${gGray}, ${bGray}), rgb(${rFull}, ${gFull}, ${bFull}))`;
+            
+            const valSlider = document.getElementById(`val${id}`);
+            const [rDark, gDark, bDark] = hsvToRgb(h, s, 0);
+            const [rBright, gBright, bBright] = hsvToRgb(h, s, 100);
+            valSlider.style.background = `linear-gradient(to right, rgb(${rDark}, ${gDark}, ${bDark}), rgb(${rBright}, ${gBright}, ${bBright}))`;
+        }
+
+        function setupColorWheel(id) {
+            const canvas = document.getElementById(`wheel${id}`);
+            
+            canvas.addEventListener('click', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                const x = e.clientX - rect.left - centerX;
+                const y = e.clientY - rect.top - centerY;
+                
+                const distance = Math.sqrt(x * x + y * y);
+                const maxRadius = Math.min(centerX, centerY) - 10;
+                
+                if (distance <= maxRadius) {
+                    const angle = (Math.atan2(y, x) * 180 / Math.PI + 90 + 360) % 360;
+                    const saturation = Math.min((distance / maxRadius) * 100, 100);
+                    
+                    document.getElementById(`hue${id}`).value = Math.round(angle);
+                    document.getElementById(`sat${id}`).value = Math.round(saturation);
+                    
+                    updateColorSpace(id);
+                }
+            });
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // Setup event listeners
+            for (let id = 1; id <= 2; id++) {
+                ['hue', 'sat', 'val'].forEach(param => {
+                    document.getElementById(`${param}${id}`).addEventListener('input', () => updateColorSpace(id));
+                });
+                setupColorWheel(id);
+                updateColorSpace(id);
+                
+                // Add Enter key support for RGB inputs
+                document.getElementById(`rgbInput${id}`).addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        applyRgbColor(id);
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
