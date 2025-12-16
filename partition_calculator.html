@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pico Partition Table Calculator</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 20px; line-height: 1.35; }
+    h1 { margin: 0 0 8px; font-size: 1.5rem; }
+    .subtle { color: #888; font-size: 0.9rem; margin-bottom: 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+    .field { display: grid; gap: 6px; }
+    .field label { font-size: 0.85rem; opacity: 0.85; }
+    input[type="number"], input[type="text"] { padding: 8px; min-width: 160px; }
+    input[type="text"].mono, input[type="number"].mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    button { padding: 8px 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #4444; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    tfoot td { font-weight: bold; }
+    .part-row { display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr auto; gap: 8px; margin-top: 8px; }
+    .part-header { display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr auto; gap: 8px; margin-top: 8px; font-size: 0.8rem; font-weight: 600; opacity: 0.8; }
+    .part-header > div:last-child { text-align: right; }
+    .misaligned-row td { background: rgba(220, 20, 60, 0.12); }
+    .warn { color: #c22; font-weight: 600; }
+    .parts { border: 1px solid #4444; padding: 12px; border-radius: 8px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .code { background: #0000000d; padding: 10px; border-radius: 6px; overflow: auto; }
+    .small { font-size: 0.85rem; opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <h1>Pico Partition Table Calculator</h1>
+  <div class="subtle">Compute start/end sectors and linker addresses (ORIGIN/LENGTH) for RP2040/RP2350-style layouts.</div>
+
+  <section class="row" style="margin-bottom: 14px; align-items: start;">
+    <div class="field">
+      <label for="baseAddr">First data address (absolute, hex)</label>
+      <input id="baseAddr" class="mono" type="text" value="0x10002000" />
+      <div class="small">Where sector <span id="firstSectorLabel">1</span> begins; commonly 0x10002000 when HEADER uses the first 8 KiB.</div>
+    </div>
+    <div class="field">
+      <label for="firstSector">First data sector index</label>
+      <input id="firstSector" type="number" value="1" min="0" step="1" />
+    </div>
+    <div class="field">
+      <label for="sectorSize">Sector/erase size (bytes)</label>
+      <input id="sectorSize" class="mono" type="number" value="4096" min="256" step="256" />
+    </div>
+    <div class="field">
+      <label for="totalSectors">Total usable sectors (optional)</label>
+      <input id="totalSectors" type="number" placeholder="e.g. 1016" min="0" step="1" />
+    </div>
+  </section>
+
+  <section class="parts">
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <h2 style="margin:0">Partitions</h2>
+      <div class="actions">
+        <button id="addPart">+ Add partition</button>
+        <button id="resetToExample">Load A/B + data example</button>
+      </div>
+    </div>
+    <div class="part-header">
+      <div>Name</div>
+      <div>Group</div>
+      <div>Sectors</div>
+      <div>Size (bytes / expr)</div>
+      <div>Actions</div>
+    </div>
+    <div id="parts"></div>
+  </section>
+
+  <section class="row" style="justify-content: space-between; align-items: center; margin-top: 14px;">
+    <div class="field">
+      <label for="presetSelect">Presets</label>
+      <select id="presetSelect" style="min-width: 220px;"></select>
+    </div>
+    <div class="actions">
+      <button id="presetSave" title="Save to selected preset">Save</button>
+      <button id="presetSaveAs" title="Save as a new preset">Save as…</button>
+      <button id="presetDelete" title="Delete selected preset">Delete</button>
+      <button id="exportLayout" title="Export current layout to a JSON file">Export…</button>
+      <button id="importLayout" title="Import layout from a JSON file">Import…</button>
+    </div>
+  </section>
+
+  <input id="importFile" type="file" accept="application/json" style="display:none" />
+
+  <section>
+    <h2>Results</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Group</th>
+          <th>Start sector</th>
+          <th>End sector</th>
+          <th>Sectors</th>
+          <th>Start addr</th>
+          <th>Size (bytes)</th>
+          <th>Linker snippet</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody"></tbody>
+      <tfoot>
+        <tr>
+          <td colspan="8" id="summary" class="small"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+
+  <section>
+    <h2>Memory.x block (optional)</h2>
+    <div class="small" style="margin-bottom:6px">Example per-partition entries you can copy into a custom linker script or as a reference. Adjust names as needed.</div>
+    <pre id="memoryBlock" class="code"></pre>
+  </section>
+
+  <script>
+    // Utilities
+    const $ = (sel) => document.querySelector(sel);
+    const partsEl = $('#parts');
+    const resultsBody = $('#resultsBody');
+    const memoryBlock = $('#memoryBlock');
+    const firstSectorEl = $('#firstSector');
+    const firstSectorLabel = $('#firstSectorLabel');
+    const presetSelect = document.getElementById('presetSelect');
+    const presetSaveBtn = document.getElementById('presetSave');
+    const presetSaveAsBtn = document.getElementById('presetSaveAs');
+    const presetDeleteBtn = document.getElementById('presetDelete');
+    const exportBtn = document.getElementById('exportLayout');
+    const importBtn = document.getElementById('importLayout');
+    const importFileInput = document.getElementById('importFile');
+
+    function parseHexOrDec(str) {
+      const s = String(str).trim();
+      if (!s) return 0;
+      if (/^0x/i.test(s)) return Number.parseInt(s, 16) || 0;
+      return Number.parseInt(s, 10) || 0;
+    }
+
+    function hex(n) {
+      return '0x' + (n >>> 0).toString(16).toUpperCase();
+    }
+
+    // Convert bytes to a human-readable value using binary units (KiB, MiB, GiB)
+    function toHumanBytes(bytes) {
+      const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+      if (!Number.isFinite(bytes) || bytes < 0) return '—';
+      let v = bytes;
+      let i = 0;
+      while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i++;
+      }
+      const value = v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+      return `${value} ${units[i]}`;
+    }
+
+    function createPartRow(name = '', group = '', sectors = 0, sizeExpr = '') {
+      const row = document.createElement('div');
+      row.className = 'part-row';
+      row.innerHTML = `
+        <input type="text" placeholder="Name (e.g., A)" value="${name}" />
+        <input type="text" placeholder="Group (optional)" value="${group}" />
+        <input type="number" placeholder="Sectors" value="${sectors}" min="0" step="1" />
+        <input type="text" placeholder="Size (e.g., 4K, 1MiB)" value="${sizeExpr}" />
+        <div class="actions">
+          <button class="up" title="Move up">↑</button>
+          <button class="down" title="Move down">↓</button>
+          <button class="remove" title="Remove">✕</button>
+        </div>
+      `;
+
+      row.querySelector('.remove').addEventListener('click', () => {
+        row.remove();
+        recalc();
+      });
+      row.querySelector('.up').addEventListener('click', () => {
+        const prev = row.previousElementSibling;
+        if (prev) partsEl.insertBefore(row, prev);
+        recalc();
+      });
+      row.querySelector('.down').addEventListener('click', () => {
+        const next = row.nextElementSibling;
+        if (next) partsEl.insertBefore(next, row);
+        recalc();
+      });
+
+      partsEl.appendChild(row);
+      const inputs = row.querySelectorAll('input');
+      inputs.forEach(i => i.addEventListener('input', recalc));
+
+      // Synchronize size <-> sectors within the row
+      const [nameInput, groupInput, sectorsInput, sizeInput] = inputs;
+
+      function bytesToSizeExpr(bytes) {
+        const units = [
+          { abbr: 'G', mul: 1024**3 },
+          { abbr: 'M', mul: 1024**2 },
+          { abbr: 'K', mul: 1024 },
+        ];
+        for (const u of units) {
+          if (bytes % u.mul === 0) return (bytes / u.mul) + u.abbr;
+        }
+        return String(bytes);
+      }
+      function syncFromSectors() {
+        const ss = Number(document.getElementById('sectorSize').value) || 4096;
+        const s = Math.max(0, Number(sectorsInput.value) || 0);
+        const bytes = s * ss;
+        sizeInput.value = bytesToSizeExpr(bytes);
+      }
+      function syncFromSize() {
+        const ss = Number(document.getElementById('sectorSize').value) || 4096;
+        const bytes = parseHumanSize(sizeInput.value);
+        const sectors = bytes > 0 ? Math.ceil(bytes / ss) : 0;
+        if (Number(sectorsInput.value) !== sectors) sectorsInput.value = String(sectors);
+      }
+      // Listeners to keep both fields in sync
+      sectorsInput.addEventListener('input', () => { syncFromSectors(); recalc(); });
+      sizeInput.addEventListener('input', () => { syncFromSize(); recalc(); });
+
+      // Initial population
+      if (sizeExpr && sizeExpr.trim()) {
+        syncFromSize();
+      } else {
+        syncFromSectors();
+      }
+
+      return row;
+    }
+
+    function readInputs() {
+      const baseAddr = parseHexOrDec($('#baseAddr').value);
+      const firstSector = Number(firstSectorEl.value) || 0;
+      const sectorSize = Number($('#sectorSize').value) || 4096;
+      const totalSectors = Number($('#totalSectors').value) || 0;
+
+      const parts = Array.from(partsEl.children).map((row) => {
+        const [nameEl, groupEl, sectorsEl, sizeEl] = row.querySelectorAll('input');
+        return {
+          name: nameEl.value.trim() || '(unnamed)',
+          group: (groupEl?.value || '').trim(),
+          sectors: Math.max(0, Number(sectorsEl.value) || 0),
+          sizeExpr: (sizeEl?.value || '').trim()
+        };
+      });
+
+      return { baseAddr, firstSector, sectorSize, totalSectors, parts };
+    }
+
+    function applyConfig(cfg) {
+      // Basic fields
+      document.getElementById('baseAddr').value = hex(cfg.baseAddr ?? 0);
+      firstSectorEl.value = String(cfg.firstSector ?? 0);
+      document.getElementById('sectorSize').value = String(cfg.sectorSize ?? 4096);
+      document.getElementById('totalSectors').value = cfg.totalSectors ? String(cfg.totalSectors) : '';
+
+      // Parts
+      partsEl.innerHTML = '';
+      const parts = Array.isArray(cfg.parts) ? cfg.parts : [];
+      if (parts.length === 0) {
+        createPartRow('A', '', 0, '');
+      } else {
+        for (const p of parts) {
+          createPartRow(p.name || '(unnamed)', (p.group || ''), Number(p.sectors) || 0, (p.sizeExpr || ''));
+        }
+      }
+      recalc();
+    }
+
+    // Parse human-readable sizes like 4K, 1.5MiB, 0x1000, 4096
+    function parseHumanSize(s) {
+      if (!s) return 0;
+      const str = String(s).trim();
+      if (!str) return 0;
+      const pow2 = {
+        '': 1,
+        'b': 1,
+        'k': 1024,
+        'kb': 1024,
+        'ki': 1024,
+        'kib': 1024,
+        'm': 1024 ** 2,
+        'mb': 1024 ** 2,
+        'mi': 1024 ** 2,
+        'mib': 1024 ** 2,
+        'g': 1024 ** 3,
+        'gb': 1024 ** 3,
+        'gi': 1024 ** 3,
+        'gib': 1024 ** 3,
+      };
+      let invalidUnit = false;
+
+      // Replace occurrences of "<number><unit>" (e.g., 4K, 1.5MiB, 2 GiB) with
+      // an explicit multiplier expression in bytes, e.g., (4*1024), (1.5*1024*1024).
+      let expr = str.replace(/([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]{1,3})/g, (_, num, unitRaw) => {
+        const u = unitRaw.toLowerCase();
+
+        // Special-case "0x" in hex literals: treat the "x" as part of the
+        // number, not as a unit, so expressions like 0x1000 and 24K-0x100 work.
+        if (u === 'x') {
+          return num + unitRaw;
+        }
+
+        const mul = pow2[u];
+        if (!mul) {
+          invalidUnit = true;
+          return '0';
+        }
+        return '(' + num + '*' + mul + ')';
+      });
+
+      if (invalidUnit) return 0;
+
+      // Allow simple arithmetic and hex in the final expression, e.g. 24K-0x100,
+      // 128*1024, 0x1000*2. At this point units are expanded into multipliers.
+      const compact = expr.replace(/\s+/g, '');
+      if (!compact) return 0;
+
+      // Only digits, hex letters, decimal point, parentheses and basic operators
+      if (!/^[0-9+\-*/().xXa-fA-F]+$/.test(compact)) return 0;
+
+      try {
+        const val = Function('"use strict"; return (' + compact + ')')();
+        if (typeof val !== 'number' || !Number.isFinite(val) || val < 0) return 0;
+        return Math.round(val);
+      } catch {
+        return 0;
+      }
+    }
+
+    function recalc() {
+      const cfg = readInputs();
+      firstSectorLabel.textContent = String(cfg.firstSector);
+
+      const roundUp = (n, mul) => (n > 0 ? Math.ceil(n / mul) * mul : 0);
+
+      let curSector = cfg.firstSector;
+      let totalUsedSectors = 0;
+
+      let totalRequestedBytes = 0;
+      let misalignedSoloCount = 0;
+      const groupSlack = new Map(); // groupName -> slackBytes
+
+      const rows = [];
+
+      // Build "segments": consecutive partitions with same non-empty group belong together.
+      let i = 0;
+      while (i < cfg.parts.length) {
+        const g = (cfg.parts[i].group || '').trim();
+        const isGrouped = !!g;
+
+        const segParts = [];
+        segParts.push(cfg.parts[i]);
+        i++;
+
+        if (isGrouped) {
+          while (i < cfg.parts.length && (cfg.parts[i].group || '').trim() === g) {
+            segParts.push(cfg.parts[i]);
+            i++;
+          }
+        }
+
+        const segStartSector = curSector;
+        const segStartAddr = cfg.baseAddr + (segStartSector - cfg.firstSector) * cfg.sectorSize;
+
+        let segOffsetBytes = 0;
+
+        // Place each partition back-to-back in bytes within the segment
+        for (const p of segParts) {
+          const reqBytes = p.sizeExpr
+            ? parseHumanSize(p.sizeExpr)
+            : (p.sectors || 0) * cfg.sectorSize;
+
+          const sizeBytes = Math.max(0, Number(reqBytes) || 0);
+          const startAddr = segStartAddr + segOffsetBytes;
+          const endAddrExclusive = startAddr + sizeBytes;
+
+          const startSector = cfg.firstSector + Math.floor((startAddr - cfg.baseAddr) / cfg.sectorSize);
+          const endSector = sizeBytes > 0
+            ? (cfg.firstSector + Math.floor(((endAddrExclusive - 1) - cfg.baseAddr) / cfg.sectorSize))
+            : (startSector - 1);
+
+          const sectorsFloat = cfg.sectorSize > 0 ? (sizeBytes / cfg.sectorSize) : 0;
+
+          const soloRequiresAlign = !isGrouped;
+          const soloMisaligned = soloRequiresAlign && sizeBytes > 0 && (sizeBytes % cfg.sectorSize !== 0);
+          if (soloMisaligned) misalignedSoloCount++;
+
+          rows.push({
+            name: p.name,
+            group: isGrouped ? g : '',
+            startSector,
+            endSector,
+            sectorsFloat,
+            startAddr,
+            sizeBytes
+          });
+
+          segOffsetBytes += sizeBytes;
+          totalRequestedBytes += sizeBytes;
+        }
+
+        const segReqBytes = segOffsetBytes;
+        const segAllocBytes = roundUp(segReqBytes, cfg.sectorSize);
+        const segAllocSectors = cfg.sectorSize > 0 ? (segAllocBytes / cfg.sectorSize) : 0;
+
+        totalUsedSectors += segAllocSectors;
+
+        if (isGrouped) {
+          const slack = segAllocBytes - segReqBytes;
+          if (slack > 0) groupSlack.set(g, (groupSlack.get(g) || 0) + slack);
+        }
+
+        const segEndSector = segAllocSectors > 0 ? (segStartSector + segAllocSectors - 1) : (segStartSector - 1);
+        curSector = segEndSector + 1;
+      }
+
+      // Render results table
+      function fmtSectors(v) {
+        if (!Number.isFinite(v)) return '0';
+        const iv = Math.round(v);
+        if (Math.abs(v - iv) < 1e-9) return String(iv);
+        const s = v.toFixed(3).replace(/\.000$/, '').replace(/(\.[0-9]*?)0+$/, '$1');
+        return s;
+      }
+
+      resultsBody.innerHTML = rows.map(r => `
+        <tr class="${(r.group === '' && r.sizeBytes > 0 && (r.sizeBytes % cfg.sectorSize !== 0)) ? 'misaligned-row' : ''}">
+          <td>${r.name}</td>
+          <td>${r.group || '—'}</td>
+          <td>${r.startSector}</td>
+          <td>${r.endSector}</td>
+          <td>${fmtSectors(r.sectorsFloat)}${(r.group === '' && r.sizeBytes > 0 && (r.sizeBytes % cfg.sectorSize !== 0)) ? ` <span class="warn">→ aligns alone</span>` : ''}</td>
+          <td>${hex(r.startAddr)}</td>
+          <td>${r.sizeBytes.toLocaleString()} B (${toHumanBytes(r.sizeBytes)}, ${hex(r.sizeBytes)})</td>
+          <td><code>${cssSafe(r.name)} : ORIGIN = ${hex(r.startAddr)}, LENGTH = ${r.sizeBytes} /* ${hex(r.sizeBytes)} */</code></td>
+        </tr>
+      `).join('');
+
+      // Summary and warnings
+      const warnings = [];
+      if (cfg.totalSectors > 0 && totalUsedSectors > cfg.totalSectors) {
+        warnings.push(`WARNING: Used ${totalUsedSectors} sectors exceeds total ${cfg.totalSectors}.`);
+      }
+      if (cfg.sectorSize % 1024 !== 0) {
+        warnings.push('Note: sector size is not a multiple of 1 KiB.');
+      }
+      if (misalignedSoloCount > 0) {
+        warnings.push(`${misalignedSoloCount} solo partition${misalignedSoloCount > 1 ? 's' : ''} not aligned (must round independently).`);
+      }
+      for (const [g, slack] of groupSlack.entries()) {
+        warnings.push(`Group "${g}" rounded up by ${slack.toLocaleString()} B (${toHumanBytes(slack)}).`);
+      }
+
+      const totalAllocatedBytes = totalUsedSectors * cfg.sectorSize;
+      const slackBytes = Math.max(0, totalAllocatedBytes - totalRequestedBytes);
+
+      $('#summary').textContent =
+        `Used sectors (allocated): ${totalUsedSectors}` +
+        (cfg.totalSectors ? ` / ${cfg.totalSectors}` : '') +
+        ` — Requested: ${totalRequestedBytes.toLocaleString()} B (${toHumanBytes(totalRequestedBytes)})` +
+        ` — Allocated: ${totalAllocatedBytes.toLocaleString()} B (${toHumanBytes(totalAllocatedBytes)})` +
+        (slackBytes ? ` — Slack: ${slackBytes.toLocaleString()} B (${toHumanBytes(slackBytes)})` : '') +
+        (warnings.length ? ' — ' + warnings.join(' ') : '');
+
+      // Memory.x convenience block (exact per-partition sizes; group rounding shows as slack in summary)
+      memoryBlock.textContent = rows.map(r =>
+        `    ${cssSafe(r.name)} : ORIGIN = ${hex(r.startAddr)}, LENGTH = ${r.sizeBytes} /* ${hex(r.sizeBytes)} */`
+      ).join('\n');
+    }
+
+    function cssSafe(name) {
+      return name.replace(/[^a-zA-Z0-9_]+/g, '_');
+    }
+
+    // Defaults and example matching the attached code (A/B + data)
+    function loadExample() {
+      partsEl.innerHTML = '';
+      createPartRow('A', '', 254, '');
+      createPartRow('B', '', 254, '');
+      createPartRow('A_data', '', 254, '');
+      createPartRow('B_data', '', 254, '');
+      $('#totalSectors').value = 1016;
+      recalc();
+    }
+
+    function handleExportLayout() {
+      const cfg = readInputs();
+      const payload = {
+        version: 1,
+        createdAt: new Date().toISOString(),
+        data: cfg,
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pico-partitions-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function handleImportFileChange(event) {
+      const input = event.target;
+      if (!input || !input.files || !input.files[0]) return;
+
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const text = String(reader.result || '');
+          const obj = JSON.parse(text);
+          const cfg = (obj && typeof obj === 'object' && obj.data) ? obj.data : obj;
+          if (!cfg || typeof cfg !== 'object') {
+            alert('Selected file does not contain a valid layout.');
+            return;
+          }
+          applyConfig(cfg);
+        } catch (e) {
+          console.error(e);
+          alert('Could not parse layout file. Ensure it is a JSON export from this tool.');
+        }
+      };
+      reader.readAsText(file);
+
+      // Allow re-selecting the same file later
+      input.value = '';
+    }
+
+    // Preset storage (localStorage)
+    const STORAGE_KEY = 'picoPartitionPresetsV1';
+    let presetState = { presets: {}, current: '' };
+
+    function loadPresetState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return { presets: {}, current: '' };
+        const data = JSON.parse(raw);
+        return {
+          presets: data && typeof data.presets === 'object' ? data.presets : {},
+          current: typeof data?.current === 'string' ? data.current : ''
+        };
+      } catch {
+        return { presets: {}, current: '' };
+      }
+    }
+
+    function persistPresetState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(presetState));
+    }
+
+    function refreshPresetSelect() {
+      const sel = presetSelect;
+      if (!sel) return;
+      const names = Object.keys(presetState.presets).sort((a, b) => a.localeCompare(b));
+      sel.innerHTML = '<option value="">— Select preset —</option>' + names.map(n => `<option value="${encodeURIComponent(n)}">${n}</option>`).join('');
+      // restore selection
+      if (presetState.current && names.includes(presetState.current)) {
+        sel.value = encodeURIComponent(presetState.current);
+      } else {
+        sel.value = '';
+      }
+    }
+
+    function getSelectedPresetName() {
+      const v = presetSelect.value;
+      if (!v) return '';
+      try { return decodeURIComponent(v); } catch { return v; }
+    }
+
+    function saveCurrentToPreset(name) {
+      if (!name) return;
+      presetState.presets[name] = readInputs();
+      presetState.current = name;
+      persistPresetState();
+      refreshPresetSelect();
+      presetSelect.value = encodeURIComponent(name);
+    }
+
+    function promptPresetName(defaultName = '') {
+      const ts = new Date();
+      const fallback = defaultName || `Preset ${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')} ${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`;
+      const name = window.prompt('Preset name:', fallback);
+      if (!name) return '';
+      return name.trim();
+    }
+
+    function initPresets() {
+      presetState = loadPresetState();
+      refreshPresetSelect();
+
+      // If there's a current preset, load it
+      const current = presetState.current;
+      if (current && presetState.presets[current]) {
+        applyConfig(presetState.presets[current]);
+        presetSelect.value = encodeURIComponent(current);
+      }
+
+      // Events
+      presetSelect?.addEventListener('change', () => {
+        const name = getSelectedPresetName();
+        if (!name) {
+          presetState.current = '';
+          persistPresetState();
+          return;
+        }
+        const cfg = presetState.presets[name];
+        if (cfg) {
+          applyConfig(cfg);
+          presetState.current = name;
+          persistPresetState();
+        }
+      });
+
+      presetSaveBtn?.addEventListener('click', () => {
+        const name = presetState.current;
+        if (name && presetState.presets[name]) {
+          saveCurrentToPreset(name);
+          return;
+        }
+        // No current preset selected -> Save As
+        const newName = promptPresetName();
+        if (!newName) return;
+        if (presetState.presets[newName] && !confirm(`Overwrite preset "${newName}"?`)) return;
+        saveCurrentToPreset(newName);
+      });
+
+      presetSaveAsBtn?.addEventListener('click', () => {
+        const suggested = presetState.current || '';
+        const name = promptPresetName(suggested);
+        if (!name) return;
+        if (presetState.presets[name] && !confirm(`Overwrite preset "${name}"?`)) return;
+        saveCurrentToPreset(name);
+      });
+
+      presetDeleteBtn?.addEventListener('click', () => {
+        const name = getSelectedPresetName();
+        if (!name) return;
+        if (!confirm(`Delete preset "${name}"?`)) return;
+        delete presetState.presets[name];
+        if (presetState.current === name) presetState.current = '';
+        persistPresetState();
+        refreshPresetSelect();
+        presetSelect.value = '';
+      });
+    }
+
+    // Wire up UI
+    $('#addPart').addEventListener('click', () => { createPartRow('New', '', 0, ''); recalc(); });
+    $('#resetToExample').addEventListener('click', loadExample);
+
+    if (exportBtn) {
+      exportBtn.addEventListener('click', handleExportLayout);
+    }
+    if (importBtn && importFileInput) {
+      importBtn.addEventListener('click', () => importFileInput.click());
+      importFileInput.addEventListener('change', handleImportFileChange);
+    }
+
+    function resyncAllRowsOnSectorSize() {
+      const ss = Number(document.getElementById('sectorSize').value) || 4096;
+      Array.from(partsEl.children).forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        if (inputs.length < 4) return;
+        const [nameEl, groupEl, sectorsEl, sizeEl] = inputs;
+
+        if (sizeEl.value && sizeEl.value.trim()) {
+          const bytes = parseHumanSize(sizeEl.value);
+          const sectors = bytes > 0 ? Math.ceil(bytes / ss) : 0;
+          if (Number(sectorsEl.value) !== sectors) sectorsEl.value = String(sectors);
+        } else {
+          const s = Math.max(0, Number(sectorsEl.value) || 0);
+          const bytes = s * ss;
+          const units = [
+            { abbr: 'G', mul: 1024**3 },
+            { abbr: 'M', mul: 1024**2 },
+            { abbr: 'K', mul: 1024 },
+          ];
+          let out = String(bytes);
+          for (const u of units) { if (bytes % u.mul === 0) { out = (bytes / u.mul) + u.abbr; break; } }
+          sizeEl.value = out;
+        }
+      });
+    }
+    ['baseAddr','firstSector','sectorSize','totalSectors'].forEach(id => {
+      document.getElementById(id).addEventListener('input', (e) => {
+        if (e.target && e.target.id === 'sectorSize') {
+          resyncAllRowsOnSectorSize();
+        }
+        recalc();
+      });
+    });
+
+    // Initial state
+    createPartRow('A', '', 254, '');
+    createPartRow('B', '', 254, '');
+    createPartRow('A_data', '', 254, '');
+    createPartRow('B_data', '', 254, '');
+    recalc();
+    initPresets();
+  </script>
+</body>
+</html>
