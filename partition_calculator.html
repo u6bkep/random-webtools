@@ -117,12 +117,19 @@
     <pre id="memoryBlock" class="code"></pre>
   </section>
 
+  <section>
+    <h2>TOML partition table</h2>
+    <div class="small" style="margin-bottom:6px">Partition table in TOML format with offsets relative to the base address.</div>
+    <pre id="tomlBlock" class="code"></pre>
+  </section>
+
   <script>
     // Utilities
     const $ = (sel) => document.querySelector(sel);
     const partsEl = $('#parts');
     const resultsBody = $('#resultsBody');
     const memoryBlock = $('#memoryBlock');
+    const tomlBlock = $('#tomlBlock');
     const firstSectorEl = $('#firstSector');
     const firstSectorLabel = $('#firstSectorLabel');
     const presetSelect = document.getElementById('presetSelect');
@@ -471,6 +478,18 @@
       memoryBlock.textContent = rows.map(r =>
         `    ${cssSafe(r.name)} : ORIGIN = ${hex(r.startAddr)}, LENGTH = ${r.sizeBytes} /* ${hex(r.sizeBytes)} */`
       ).join('\n');
+
+      // TOML partition table (offsets relative to baseAddr)
+      const tomlLines = ['[flash.partitions]'];
+      const maxNameLen = Math.max(...rows.map(r => cssSafe(r.name).length), 1);
+      for (const r of rows) {
+        const name = cssSafe(r.name).padEnd(maxNameLen);
+        const offset = r.startAddr - cfg.baseAddr;
+        const offsetHex = '0x' + offset.toString(16).toUpperCase().padStart(8, '0');
+        const sizeHex = '0x' + r.sizeBytes.toString(16).toUpperCase().padStart(8, '0');
+        tomlLines.push(`${name} = { offset = ${offsetHex}, size = ${sizeHex} }  # ${r.sizeBytes} bytes`);
+      }
+      tomlBlock.textContent = tomlLines.join('\n');
     }
 
     function cssSafe(name) {
