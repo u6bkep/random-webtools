@@ -80,12 +80,15 @@
       <button id="presetSave" title="Save to selected preset">Save</button>
       <button id="presetSaveAs" title="Save as a new preset">Save as…</button>
       <button id="presetDelete" title="Delete selected preset">Delete</button>
-      <button id="exportLayout" title="Export current layout to a JSON file">Export…</button>
-      <button id="importLayout" title="Import layout from a JSON file">Import…</button>
+      <button id="exportLayout" title="Export current layout to a JSON file">Export JSON…</button>
+      <button id="importLayout" title="Import layout from a JSON file">Import JSON…</button>
+      <button id="exportRavenToml" title="Export as raven.toml format">Export raven.toml…</button>
+      <button id="importRavenToml" title="Import from raven.toml file">Import raven.toml…</button>
     </div>
   </section>
 
   <input id="importFile" type="file" accept="application/json" style="display:none" />
+  <input id="importTomlFile" type="file" accept=".toml,text/plain" style="display:none" />
 
   <section>
     <h2>Results</h2>
@@ -118,8 +121,8 @@
   </section>
 
   <section>
-    <h2>TOML partition table</h2>
-    <div class="small" style="margin-bottom:6px">Partition table in TOML format with offsets relative to the base address.</div>
+    <h2>raven.toml partition table</h2>
+    <div class="small" style="margin-bottom:6px">Partition definitions in raven.toml format. Offsets are relative to flash origin (0x10000000).</div>
     <pre id="tomlBlock" class="code"></pre>
   </section>
 
@@ -139,6 +142,9 @@
     const exportBtn = document.getElementById('exportLayout');
     const importBtn = document.getElementById('importLayout');
     const importFileInput = document.getElementById('importFile');
+    const exportRavenTomlBtn = document.getElementById('exportRavenToml');
+    const importRavenTomlBtn = document.getElementById('importRavenToml');
+    const importTomlFileInput = document.getElementById('importTomlFile');
 
     function parseHexOrDec(str) {
       const s = String(str).trim();
@@ -149,6 +155,258 @@
 
     function hex(n) {
       return '0x' + (n >>> 0).toString(16).toUpperCase();
+    }
+
+    function hexPad(n, digits = 8) {
+      return '0x' + (n >>> 0).toString(16).padStart(digits, '0');
+    }
+
+    // Simple TOML parser for raven.toml format (subset needed for partitions)
+    function parseToml(text) {
+      const result = {};
+      let currentSection = null;
+      const lines = text.split('\n');
+
+      for (let line of lines) {
+        line = line.replace(/#.*$/, '').trim();
+        if (!line) continue;
+
+        // Section header like [flash] or [partitions.slot_0]
+        const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+        if (sectionMatch) {
+          const path = sectionMatch[1].split('.');
+          currentSection = path;
+          // Ensure path exists in result
+          let obj = result;
+          for (const key of path) {
+            if (!obj[key]) obj[key] = {};
+            obj = obj[key];
+          }
+          continue;
+        }
+
+        // Key-value pair
+        const kvMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
+        if (kvMatch && currentSection) {
+          const key = kvMatch[1];
+          let value = kvMatch[2].trim();
+
+          // Parse the value
+          value = parseTomlValue(value);
+
+          // Set value at current section
+          let obj = result;
+          for (const k of currentSection) {
+            obj = obj[k];
+          }
+          obj[key] = value;
+        }
+      }
+
+      return result;
+    }
+
+    function parseTomlValue(str) {
+      str = str.trim();
+
+      // Boolean
+      if (str === 'true') return true;
+      if (str === 'false') return false;
+
+      // Quoted string
+      if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+        return str.slice(1, -1);
+      }
+
+      // Hex number
+      if (/^0x[0-9a-fA-F]+$/.test(str)) {
+        return parseInt(str, 16);
+      }
+
+      // Decimal number
+      if (/^-?\d+$/.test(str)) {
+        return parseInt(str, 10);
+      }
+
+      // Float
+      if (/^-?\d+\.\d+$/.test(str)) {
+        return parseFloat(str);
+      }
+
+      // Inline table { key = value, ... }
+      if (str.startsWith('{') && str.endsWith('}')) {
+        const inner = str.slice(1, -1).trim();
+        const obj = {};
+        // Simple parsing of inline table
+        const pairs = inner.split(',');
+        for (const pair of pairs) {
+          const m = pair.trim().match(/^(\w+)\s*=\s*(.+)$/);
+          if (m) {
+            obj[m[1]] = parseTomlValue(m[2].trim());
+          }
+        }
+        return obj;
+      }
+
+      // Array [...]
+      if (str.startsWith('[') && str.endsWith(']')) {
+        const inner = str.slice(1, -1).trim();
+        if (!inner) return [];
+        return inner.split(',').map(s => parseTomlValue(s.trim()));
+      }
+
+      // Size string like "2MB" or "520KB"
+      const sizeMatch = str.match(/^"(\d+(?:\.\d+)?)\s*(KB|MB|GB|KiB|MiB|GiB|K|M|G|B)?"$/i);
+      if (sizeMatch) {
+        const num = parseFloat(sizeMatch[1]);
+        const unit = (sizeMatch[2] || 'B').toUpperCase();
+        const multipliers = {
+          'B': 1, 'K': 1024, 'KB': 1024, 'KI': 1024, 'KIB': 1024,
+          'M': 1024**2, 'MB': 1024**2, 'MI': 1024**2, 'MIB': 1024**2,
+          'G': 1024**3, 'GB': 1024**3, 'GI': 1024**3, 'GIB': 1024**3,
+        };
+        return num * (multipliers[unit] || 1);
+      }
+
+      // Return as string
+      return str.replace(/^["']|["']$/g, '');
+    }
+
+    // Generate raven.toml format from current configuration
+    function generateRavenToml(cfg, rows) {
+      const lines = [];
+
+      lines.push('# Partition Table Configuration');
+      lines.push('# Generated by Pico Partition Table Calculator');
+      lines.push('');
+
+      // Flash section
+      lines.push('[flash]');
+      lines.push(`origin = ${hexPad(cfg.baseAddr - (cfg.firstSector * cfg.sectorSize))}`);
+      const totalBytes = cfg.totalSectors > 0 ? cfg.totalSectors * cfg.sectorSize : null;
+      if (totalBytes) {
+        if (totalBytes % (1024 * 1024) === 0) {
+          lines.push(`size = "${totalBytes / (1024 * 1024)}MB"`);
+        } else if (totalBytes % 1024 === 0) {
+          lines.push(`size = "${totalBytes / 1024}KB"`);
+        } else {
+          lines.push(`size = ${totalBytes}`);
+        }
+      }
+      lines.push('');
+
+      // Partition table comment
+      lines.push('# ============================================================================');
+      lines.push('# Partitions');
+      lines.push('# ============================================================================');
+      lines.push('');
+
+      // Calculate flash origin (base of flash, not first data sector)
+      const flashOrigin = cfg.baseAddr - (cfg.firstSector * cfg.sectorSize);
+
+      for (const r of rows) {
+        const safeName = cssSafe(r.name).toLowerCase();
+        lines.push(`[partitions.${safeName}]`);
+        // Offset relative to flash origin
+        const offset = r.startAddr - flashOrigin;
+        lines.push(`offset = ${hexPad(offset)}`);
+        lines.push(`size = ${hexPad(r.sizeBytes)}`);
+
+        // Add common partition flags as comments for user reference
+        lines.push(`# not_bootable_arm = true`);
+        lines.push(`# not_bootable_riscv = true`);
+        lines.push(`# permissions = { secure_read = true, nonsecure_read = true }`);
+        lines.push('');
+      }
+
+      return lines.join('\n');
+    }
+
+    // Import raven.toml and apply to calculator
+    function importRavenToml(text) {
+      const toml = parseToml(text);
+
+      // Extract flash config
+      const flash = toml.flash || {};
+      const flashOrigin = flash.origin || 0x10000000;
+      let flashSize = flash.size;
+      if (typeof flashSize === 'string') {
+        flashSize = parseHumanSize(flashSize);
+      }
+
+      // Extract partitions
+      const partitions = toml.partitions || {};
+      const partList = [];
+
+      for (const [name, part] of Object.entries(partitions)) {
+        if (typeof part !== 'object') continue;
+
+        const offset = part.offset || 0;
+        const size = part.size || 0;
+
+        partList.push({
+          name,
+          offset,
+          size,
+          // Preserve other properties for reference
+          meta: part
+        });
+      }
+
+      // Sort partitions by offset
+      partList.sort((a, b) => a.offset - b.offset);
+
+      if (partList.length === 0) {
+        alert('No partitions found in the TOML file.');
+        return;
+      }
+
+      // Determine sector size (try to infer from partition alignments)
+      let sectorSize = 4096; // Default
+      for (const p of partList) {
+        if (p.offset > 0 && p.offset % 4096 === 0) {
+          sectorSize = 4096;
+          break;
+        }
+      }
+
+      // Find the first partition to determine baseAddr
+      const firstPartOffset = partList[0].offset;
+      const baseAddr = flashOrigin + firstPartOffset;
+      const firstSector = Math.floor(firstPartOffset / sectorSize);
+
+      // Calculate total sectors if flash size is known
+      const totalSectors = flashSize ? Math.floor(flashSize / sectorSize) : 0;
+
+      // Convert to calculator format
+      const cfg = {
+        baseAddr,
+        firstSector,
+        sectorSize,
+        totalSectors,
+        parts: partList.map(p => ({
+          name: p.name,
+          group: '',
+          sectors: Math.ceil(p.size / sectorSize),
+          sizeExpr: toHumanBytesExpr(p.size)
+        }))
+      };
+
+      applyConfig(cfg);
+    }
+
+    // Convert bytes to a short expression like "4K" or "1M"
+    function toHumanBytesExpr(bytes) {
+      const units = [
+        { abbr: 'M', mul: 1024**2 },
+        { abbr: 'K', mul: 1024 },
+      ];
+      for (const u of units) {
+        if (bytes >= u.mul && bytes % u.mul === 0) {
+          return (bytes / u.mul) + u.abbr;
+        }
+      }
+      return String(bytes);
     }
 
     // Convert bytes to a human-readable value using binary units (KiB, MiB, GiB)
@@ -479,15 +737,20 @@
         `    ${cssSafe(r.name)} : ORIGIN = ${hex(r.startAddr)}, LENGTH = ${r.sizeBytes} /* ${hex(r.sizeBytes)} */`
       ).join('\n');
 
-      // TOML partition table (offsets relative to baseAddr)
-      const tomlLines = ['[flash.partitions]'];
-      const maxNameLen = Math.max(...rows.map(r => cssSafe(r.name).length), 1);
+      // TOML partition table (raven.toml format with offsets relative to flash origin)
+      const flashOrigin = cfg.baseAddr - (cfg.firstSector * cfg.sectorSize);
+      const tomlLines = [];
+      tomlLines.push('# raven.toml partition definitions');
+      tomlLines.push('');
       for (const r of rows) {
-        const name = cssSafe(r.name).padEnd(maxNameLen);
-        const offset = r.startAddr - cfg.baseAddr;
-        const offsetHex = '0x' + offset.toString(16).toUpperCase().padStart(8, '0');
-        const sizeHex = '0x' + r.sizeBytes.toString(16).toUpperCase().padStart(8, '0');
-        tomlLines.push(`${name} = { offset = ${offsetHex}, size = ${sizeHex} }  # ${r.sizeBytes} bytes`);
+        const safeName = cssSafe(r.name).toLowerCase();
+        const offset = r.startAddr - flashOrigin;
+        const offsetHex = '0x' + offset.toString(16).padStart(8, '0');
+        const sizeHex = '0x' + r.sizeBytes.toString(16).padStart(8, '0');
+        tomlLines.push(`[partitions.${safeName}]`);
+        tomlLines.push(`offset = ${offsetHex}`);
+        tomlLines.push(`size = ${sizeHex}  # ${r.sizeBytes.toLocaleString()} bytes (${toHumanBytes(r.sizeBytes)})`);
+        tomlLines.push('');
       }
       tomlBlock.textContent = tomlLines.join('\n');
     }
@@ -548,6 +811,69 @@
         } catch (e) {
           console.error(e);
           alert('Could not parse layout file. Ensure it is a JSON export from this tool.');
+        }
+      };
+      reader.readAsText(file);
+
+      // Allow re-selecting the same file later
+      input.value = '';
+    }
+
+    function handleExportRavenToml() {
+      const cfg = readInputs();
+
+      // Build rows for export (reuse logic from recalc)
+      const rows = [];
+      let curSector = cfg.firstSector;
+
+      for (const p of cfg.parts) {
+        const reqBytes = p.sizeExpr
+          ? parseHumanSize(p.sizeExpr)
+          : (p.sectors || 0) * cfg.sectorSize;
+
+        const sizeBytes = Math.max(0, Number(reqBytes) || 0);
+        const startAddr = cfg.baseAddr + (curSector - cfg.firstSector) * cfg.sectorSize;
+
+        rows.push({
+          name: p.name,
+          group: p.group || '',
+          startAddr,
+          sizeBytes
+        });
+
+        const allocSectors = cfg.sectorSize > 0 ? Math.ceil(sizeBytes / cfg.sectorSize) : 0;
+        curSector += allocSectors;
+      }
+
+      const tomlContent = generateRavenToml(cfg, rows);
+
+      const blob = new Blob([tomlContent], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `raven-${stamp}.toml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function handleImportTomlFileChange(event) {
+      const input = event.target;
+      if (!input || !input.files || !input.files[0]) return;
+
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const text = String(reader.result || '');
+          importRavenToml(text);
+        } catch (e) {
+          console.error(e);
+          alert('Could not parse TOML file. Ensure it is a valid raven.toml format.');
         }
       };
       reader.readAsText(file);
@@ -684,6 +1010,13 @@
     if (importBtn && importFileInput) {
       importBtn.addEventListener('click', () => importFileInput.click());
       importFileInput.addEventListener('change', handleImportFileChange);
+    }
+    if (exportRavenTomlBtn) {
+      exportRavenTomlBtn.addEventListener('click', handleExportRavenToml);
+    }
+    if (importRavenTomlBtn && importTomlFileInput) {
+      importRavenTomlBtn.addEventListener('click', () => importTomlFileInput.click());
+      importTomlFileInput.addEventListener('change', handleImportTomlFileChange);
     }
 
     function resyncAllRowsOnSectorSize() {
