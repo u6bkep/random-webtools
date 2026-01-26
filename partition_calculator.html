@@ -311,6 +311,9 @@
       const flashOrigin = cfg.baseAddr - (cfg.firstSector * cfg.sectorSize);
 
       for (const r of rows) {
+        // Skip gaps - they shouldn't be in raven.toml
+        if (r.isGap) continue;
+
         const safeName = cssSafe(r.name).toLowerCase();
         lines.push(`[partitions.${safeName}]`);
         // Offset relative to flash origin
@@ -384,18 +387,46 @@
       // Calculate total sectors if flash size is known
       const totalSectors = flashSize ? Math.floor(flashSize / sectorSize) : 0;
 
+      // Build parts list with gaps detected
+      const parts = [];
+      for (let i = 0; i < partList.length; i++) {
+        const p = partList[i];
+
+        // Check if there's a gap before this partition
+        if (i > 0) {
+          const prevPart = partList[i - 1];
+          const prevEnd = prevPart.offset + prevPart.size;
+          const gapSize = p.offset - prevEnd;
+
+          if (gapSize > 0) {
+            // Add gap entry
+            parts.push({
+              name: '(gap)',
+              group: '',
+              sectors: Math.ceil(gapSize / sectorSize),
+              sizeExpr: toHumanBytesExpr(gapSize),
+              isGap: true
+            });
+          }
+        }
+
+        // Add the partition itself
+        parts.push({
+          name: p.name,
+          group: '',
+          sectors: Math.ceil(p.size / sectorSize),
+          sizeExpr: toHumanBytesExpr(p.size),
+          isGap: false
+        });
+      }
+
       // Convert to calculator format
       const cfg = {
         baseAddr,
         firstSector,
         sectorSize,
         totalSectors,
-        parts: partList.map(p => ({
-          name: p.name,
-          group: '',
-          sectors: Math.ceil(p.size / sectorSize),
-          sizeExpr: toHumanBytesExpr(p.size)
-        }))
+        parts
       };
 
       applyConfig(cfg);
@@ -864,27 +895,58 @@
     function handleExportRavenToml() {
       const cfg = readInputs();
 
-      // Build rows for export (reuse logic from recalc)
+      // Build rows for export - need to handle groups properly like recalc does
       const rows = [];
+      const roundUp = (n, mul) => (n > 0 ? Math.ceil(n / mul) * mul : 0);
+
+      let i = 0;
       let curSector = cfg.firstSector;
 
-      for (const p of cfg.parts) {
-        const reqBytes = p.sizeExpr
-          ? parseHumanSize(p.sizeExpr)
-          : (p.sectors || 0) * cfg.sectorSize;
+      while (i < cfg.parts.length) {
+        const g = (cfg.parts[i].group || '').trim();
+        const isGrouped = !!g;
 
-        const sizeBytes = Math.max(0, Number(reqBytes) || 0);
-        const startAddr = cfg.baseAddr + (curSector - cfg.firstSector) * cfg.sectorSize;
+        const segParts = [];
+        segParts.push(cfg.parts[i]);
+        i++;
 
-        rows.push({
-          name: p.name,
-          group: p.group || '',
-          startAddr,
-          sizeBytes
-        });
+        if (isGrouped) {
+          while (i < cfg.parts.length && (cfg.parts[i].group || '').trim() === g) {
+            segParts.push(cfg.parts[i]);
+            i++;
+          }
+        }
 
-        const allocSectors = cfg.sectorSize > 0 ? Math.ceil(sizeBytes / cfg.sectorSize) : 0;
-        curSector += allocSectors;
+        const segStartSector = curSector;
+        const segStartAddr = cfg.baseAddr + (segStartSector - cfg.firstSector) * cfg.sectorSize;
+        let segOffsetBytes = 0;
+
+        // Place each partition back-to-back in bytes within the segment
+        for (const p of segParts) {
+          const reqBytes = p.sizeExpr
+            ? parseHumanSize(p.sizeExpr)
+            : (p.sectors || 0) * cfg.sectorSize;
+
+          const sizeBytes = Math.max(0, Number(reqBytes) || 0);
+          const startAddr = segStartAddr + segOffsetBytes;
+
+          rows.push({
+            name: p.name,
+            group: isGrouped ? g : '',
+            startAddr,
+            sizeBytes,
+            isGap: p.isGap || false
+          });
+
+          segOffsetBytes += sizeBytes;
+        }
+
+        const segReqBytes = segOffsetBytes;
+        const segAllocBytes = roundUp(segReqBytes, cfg.sectorSize);
+        const segAllocSectors = cfg.sectorSize > 0 ? (segAllocBytes / cfg.sectorSize) : 0;
+
+        const segEndSector = segAllocSectors > 0 ? (segStartSector + segAllocSectors - 1) : (segStartSector - 1);
+        curSector = segEndSector + 1;
       }
 
       const tomlContent = generateRavenToml(cfg, rows);
