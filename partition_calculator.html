@@ -18,8 +18,12 @@
     table { width: 100%; border-collapse: collapse; margin-top: 16px; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid #4444; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     tfoot td { font-weight: bold; }
-    .part-row { display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr auto; gap: 8px; margin-top: 8px; }
-    .part-header { display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr auto; gap: 8px; margin-top: 8px; font-size: 0.8rem; font-weight: 600; opacity: 0.8; }
+    .part-row { display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr auto auto; gap: 8px; margin-top: 8px; align-items: center; }
+    .part-header { display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr auto auto; gap: 8px; margin-top: 8px; font-size: 0.8rem; font-weight: 600; opacity: 0.8; }
+    .gap-toggle { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; }
+    .gap-toggle input { margin: 0; }
+    .part-row.is-gap input:not([type="checkbox"]) { opacity: 0.6; }
+    .part-row.is-gap input[type="text"]:first-child { font-style: italic; }
     .part-header > div:last-child { text-align: right; }
     .misaligned-row td { background: rgba(220, 20, 60, 0.12); }
     .warn { color: #c22; font-weight: 600; }
@@ -58,6 +62,7 @@
       <h2 style="margin:0">Partitions</h2>
       <div class="actions">
         <button id="addPart">+ Add partition</button>
+        <button id="addGap">+ Add gap</button>
         <button id="resetToExample">Load A/B + data example</button>
       </div>
     </div>
@@ -66,6 +71,7 @@
       <div>Group</div>
       <div>Sectors</div>
       <div>Size (bytes / expr)</div>
+      <div>Gap</div>
       <div>Actions</div>
     </div>
     <div id="parts"></div>
@@ -423,20 +429,29 @@
       return `${value} ${units[i]}`;
     }
 
-    function createPartRow(name = '', group = '', sectors = 0, sizeExpr = '') {
+    function createPartRow(name = '', group = '', sectors = 0, sizeExpr = '', isGap = false) {
       const row = document.createElement('div');
-      row.className = 'part-row';
+      row.className = 'part-row' + (isGap ? ' is-gap' : '');
       row.innerHTML = `
-        <input type="text" placeholder="Name (e.g., A)" value="${name}" />
+        <input type="text" placeholder="${isGap ? 'Gap label (optional)' : 'Name (e.g., A)'}" value="${name}" />
         <input type="text" placeholder="Group (optional)" value="${group}" />
         <input type="number" placeholder="Sectors" value="${sectors}" min="0" step="1" />
         <input type="text" placeholder="Size (e.g., 4K, 1MiB)" value="${sizeExpr}" />
+        <label class="gap-toggle"><input type="checkbox" class="gap-check" ${isGap ? 'checked' : ''} title="Mark as gap (reserve space only)" />Gap</label>
         <div class="actions">
           <button class="up" title="Move up">↑</button>
           <button class="down" title="Move down">↓</button>
           <button class="remove" title="Remove">✕</button>
         </div>
       `;
+
+      const gapCheck = row.querySelector('.gap-check');
+      gapCheck.addEventListener('change', () => {
+        row.classList.toggle('is-gap', gapCheck.checked);
+        const nameInput = row.querySelector('input[type="text"]');
+        nameInput.placeholder = gapCheck.checked ? 'Gap label (optional)' : 'Name (e.g., A)';
+        recalc();
+      });
 
       row.querySelector('.remove').addEventListener('click', () => {
         row.remove();
@@ -504,12 +519,15 @@
       const totalSectors = Number($('#totalSectors').value) || 0;
 
       const parts = Array.from(partsEl.children).map((row) => {
-        const [nameEl, groupEl, sectorsEl, sizeEl] = row.querySelectorAll('input');
+        const [nameEl, groupEl, sectorsEl, sizeEl] = row.querySelectorAll('input[type="text"], input[type="number"]');
+        const gapCheck = row.querySelector('.gap-check');
+        const isGap = gapCheck ? gapCheck.checked : false;
         return {
-          name: nameEl.value.trim() || '(unnamed)',
+          name: nameEl.value.trim() || (isGap ? '(gap)' : '(unnamed)'),
           group: (groupEl?.value || '').trim(),
           sectors: Math.max(0, Number(sectorsEl.value) || 0),
-          sizeExpr: (sizeEl?.value || '').trim()
+          sizeExpr: (sizeEl?.value || '').trim(),
+          isGap
         };
       });
 
@@ -527,10 +545,10 @@
       partsEl.innerHTML = '';
       const parts = Array.isArray(cfg.parts) ? cfg.parts : [];
       if (parts.length === 0) {
-        createPartRow('A', '', 0, '');
+        createPartRow('A', '', 0, '', false);
       } else {
         for (const p of parts) {
-          createPartRow(p.name || '(unnamed)', (p.group || ''), Number(p.sectors) || 0, (p.sizeExpr || ''));
+          createPartRow(p.name || (p.isGap ? '(gap)' : '(unnamed)'), (p.group || ''), Number(p.sectors) || 0, (p.sizeExpr || ''), !!p.isGap);
         }
       }
       recalc();
@@ -653,17 +671,20 @@
 
           const soloRequiresAlign = !isGrouped;
           const soloMisaligned = soloRequiresAlign && sizeBytes > 0 && (sizeBytes % cfg.sectorSize !== 0);
-          if (soloMisaligned) misalignedSoloCount++;
+          if (soloMisaligned && !p.isGap) misalignedSoloCount++;
 
-          rows.push({
-            name: p.name,
-            group: isGrouped ? g : '',
-            startSector,
-            endSector,
-            sectorsFloat,
-            startAddr,
-            sizeBytes
-          });
+          // Only add non-gap entries to the results table
+          if (!p.isGap) {
+            rows.push({
+              name: p.name,
+              group: isGrouped ? g : '',
+              startSector,
+              endSector,
+              sectorsFloat,
+              startAddr,
+              sizeBytes
+            });
+          }
 
           segOffsetBytes += sizeBytes;
           totalRequestedBytes += sizeBytes;
@@ -733,9 +754,30 @@
         (warnings.length ? ' — ' + warnings.join(' ') : '');
 
       // Memory.x convenience block (exact per-partition sizes; group rounding shows as slack in summary)
-      memoryBlock.textContent = rows.map(r =>
-        `    ${cssSafe(r.name)} : ORIGIN = ${hex(r.startAddr)}, LENGTH = ${r.sizeBytes} /* ${hex(r.sizeBytes)} */`
-      ).join('\n');
+      if (!rows.length) {
+        memoryBlock.textContent = '';
+      } else {
+        const entries = rows.map(r => ({
+          name: cssSafe(r.name),
+          origin: hex(r.startAddr),
+          lenDec: String(r.sizeBytes),
+          lenHex: hex(r.sizeBytes),
+        }));
+
+        const nameWidth = Math.max(...entries.map(e => e.name.length));
+        const originWidth = Math.max(...entries.map(e => e.origin.length));
+        const lenDecWidth = Math.max(...entries.map(e => e.lenDec.length));
+
+        memoryBlock.textContent = entries.map(e =>
+          '    ' +
+          e.name.padEnd(nameWidth, ' ') +
+          ' : ORIGIN = ' +
+          e.origin.padEnd(originWidth, ' ') +
+          ', LENGTH = ' +
+          e.lenDec.padEnd(lenDecWidth, ' ') +
+          ' /* ' + e.lenHex + ' */'
+        ).join('\n');
+      }
 
       // TOML partition table (raven.toml format with offsets relative to flash origin)
       const flashOrigin = cfg.baseAddr - (cfg.firstSector * cfg.sectorSize);
@@ -762,10 +804,10 @@
     // Defaults and example matching the attached code (A/B + data)
     function loadExample() {
       partsEl.innerHTML = '';
-      createPartRow('A', '', 254, '');
-      createPartRow('B', '', 254, '');
-      createPartRow('A_data', '', 254, '');
-      createPartRow('B_data', '', 254, '');
+      createPartRow('A', '', 254, '', false);
+      createPartRow('B', '', 254, '', false);
+      createPartRow('A_data', '', 254, '', false);
+      createPartRow('B_data', '', 254, '', false);
       $('#totalSectors').value = 1016;
       recalc();
     }
@@ -1001,7 +1043,8 @@
     }
 
     // Wire up UI
-    $('#addPart').addEventListener('click', () => { createPartRow('New', '', 0, ''); recalc(); });
+    $('#addPart').addEventListener('click', () => { createPartRow('New', '', 0, '', false); recalc(); });
+    $('#addGap').addEventListener('click', () => { createPartRow('', '', 0, '4K', true); recalc(); });
     $('#resetToExample').addEventListener('click', loadExample);
 
     if (exportBtn) {
@@ -1054,10 +1097,10 @@
     });
 
     // Initial state
-    createPartRow('A', '', 254, '');
-    createPartRow('B', '', 254, '');
-    createPartRow('A_data', '', 254, '');
-    createPartRow('B_data', '', 254, '');
+    createPartRow('A', '', 254, '', false);
+    createPartRow('B', '', 254, '', false);
+    createPartRow('A_data', '', 254, '', false);
+    createPartRow('B_data', '', 254, '', false);
     recalc();
     initPresets();
   </script>
