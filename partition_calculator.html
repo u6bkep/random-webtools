@@ -55,6 +55,11 @@
       <label for="totalSectors">Total usable sectors (optional)</label>
       <input id="totalSectors" type="number" placeholder="e.g. 1016" min="0" step="1" />
     </div>
+    <div class="field">
+      <label for="totalBytes">Total usable bytes (optional)</label>
+      <input id="totalBytes" class="mono" type="text" placeholder="e.g. 4064K, 2MiB" />
+      <div class="small">Same value as sectors; editing either updates the other.</div>
+    </div>
   </section>
 
   <section class="parts">
@@ -141,6 +146,8 @@
     const tomlBlock = $('#tomlBlock');
     const firstSectorEl = $('#firstSector');
     const firstSectorLabel = $('#firstSectorLabel');
+    const totalSectorsEl = $('#totalSectors');
+    const totalBytesEl = $('#totalBytes');
     const presetSelect = document.getElementById('presetSelect');
     const presetSaveBtn = document.getElementById('presetSave');
     const presetSaveAsBtn = document.getElementById('presetSaveAs');
@@ -571,6 +578,7 @@
       firstSectorEl.value = String(cfg.firstSector ?? 0);
       document.getElementById('sectorSize').value = String(cfg.sectorSize ?? 4096);
       document.getElementById('totalSectors').value = cfg.totalSectors ? String(cfg.totalSectors) : '';
+      syncTotalBytesFromSectors();
 
       // Parts
       partsEl.innerHTML = '';
@@ -840,6 +848,7 @@
       createPartRow('A_data', '', 254, '', false);
       createPartRow('B_data', '', 254, '', false);
       $('#totalSectors').value = 1016;
+      syncTotalBytesFromSectors();
       recalc();
     }
 
@@ -1104,6 +1113,22 @@
       });
     }
 
+    // Keep the "total usable sectors" and "total usable bytes" fields in sync.
+    // Sectors are canonical; bytes are a human-readable view (sectors * sectorSize).
+    function syncTotalBytesFromSectors() {
+      const ss = Number($('#sectorSize').value) || 4096;
+      const sectors = Math.max(0, Number(totalSectorsEl.value) || 0);
+      totalBytesEl.value = sectors > 0 ? toHumanBytesExpr(sectors * ss) : '';
+    }
+    function syncTotalSectorsFromBytes() {
+      const ss = Number($('#sectorSize').value) || 4096;
+      const bytes = parseHumanSize(totalBytesEl.value);
+      const sectors = bytes > 0 ? Math.floor(bytes / ss) : 0;
+      const next = sectors > 0 ? String(sectors) : '';
+      if (totalSectorsEl.value !== next) totalSectorsEl.value = next;
+    }
+    totalBytesEl.addEventListener('input', () => { syncTotalSectorsFromBytes(); recalc(); });
+
     // Wire up UI
     $('#addPart').addEventListener('click', () => { createPartRow('New', '', 0, '', false); recalc(); });
     $('#addGap').addEventListener('click', () => { createPartRow('', '', 0, '4K', true); recalc(); });
@@ -1153,6 +1178,10 @@
       document.getElementById(id).addEventListener('input', (e) => {
         if (e.target && e.target.id === 'sectorSize') {
           resyncAllRowsOnSectorSize();
+          syncTotalBytesFromSectors();
+        }
+        if (e.target && e.target.id === 'totalSectors') {
+          syncTotalBytesFromSectors();
         }
         recalc();
       });
@@ -1163,6 +1192,7 @@
     createPartRow('B', '', 254, '', false);
     createPartRow('A_data', '', 254, '', false);
     createPartRow('B_data', '', 254, '', false);
+    syncTotalBytesFromSectors();
     recalc();
     initPresets();
   </script>
