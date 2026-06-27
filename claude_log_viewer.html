@@ -489,6 +489,13 @@ function classifyLane(ev) {
   if (ev.type === "assistant") return "left";
   if (ev.type !== "user") return "center";
   if (ev.isMeta) return "center";
+  if (ev.isCompactSummary) return "center";                   // compaction continuation summary
+  // newer logs carry structured provenance — trust it first
+  if (ev.promptSource === "system") return "center";          // task-notifications, etc.
+  const okind = ev.origin && ev.origin.kind;
+  if (okind === "human") return "right";                      // typed / queued / suggestion-accepted
+  if (okind) return "center";                                 // any non-human origin
+  // older logs (no origin): fall back to content inspection
   const c = ev.message && ev.message.content;
   if (Array.isArray(c)) {
     const hasToolResult = c.some(b => b && b.type === "tool_result");
@@ -496,7 +503,7 @@ function classifyLane(ev) {
     return (hasToolResult && !hasText) ? "center" : "right";
   }
   if (typeof c === "string") {
-    if (/<command-name>|<local-command-stdout>|<local-command-caveat>|<command-message>|<command-args>/.test(c)) return "center";
+    if (/<command-name>|<local-command-stdout>|<local-command-caveat>|<command-message>|<command-args>|<task-notification>|<system-reminder>/.test(c)) return "center";
     return c.trim() ? "right" : "center";
   }
   return "center";
@@ -504,6 +511,10 @@ function classifyLane(ev) {
 function laneLabel(ev, lane) {
   if (lane === "right") return "you";
   if (ev.type === "assistant") return "claude";
+  if (ev.isCompactSummary) return "compact summary";
+  const okind = ev.origin && ev.origin.kind;
+  if (okind && okind !== "human") return okind;               // e.g. task-notification
+  if (ev.promptSource === "system") return "system";
   const c = ev.message && ev.message.content;
   if (Array.isArray(c) && c.some(b => b && b.type === "tool_result")) return "tool result";
   return "harness";
